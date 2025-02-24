@@ -15,10 +15,6 @@
 - Node.js
 - npm 或 yarn
 
-### 安裝
-
-1. 克隆倉庫
-
 ## 技術棧
 
 - Next.js 14
