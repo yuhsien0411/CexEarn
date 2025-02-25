@@ -40,7 +40,49 @@ const Home: FC = () => {
   const [selectedCoin, setSelectedCoin] = useState<string>(STABLECOINS[0]);
   const [selectedPeriod, setSelectedPeriod] = useState<'1d' | '1w' | '1m'>('1d');
   const [retryCount, setRetryCount] = useState(0);
+  const [availableCoins, setAvailableCoins] = useState<Set<string>>(new Set([STABLECOINS[0]]));
   const maxRetries = 3;
+
+  // 檢查穩定幣是否可用的函數
+  const checkAvailableCoins = async () => {
+    const coinAvailability = await Promise.all(
+      STABLECOINS.map(async (coin) => {
+        try {
+          const response = await fetch(
+            `/api/products?period=${selectedPeriod}&coin=${coin}`,
+            { 
+              headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+              }
+            }
+          );
+          
+          if (!response.ok) return null;
+          
+          const data = await response.json() as ApiResponse;
+          return data.success && data.data && data.data.length > 0 ? coin : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const available = new Set(coinAvailability.filter(Boolean) as string[]);
+    setAvailableCoins(available);
+    
+    // 如果當前選擇的幣種不可用，切換到第一個可用的幣種
+    if (available.size > 0 && !available.has(selectedCoin)) {
+      const firstAvailableCoin = available.values().next().value;
+      if (firstAvailableCoin) {
+        setSelectedCoin(firstAvailableCoin);
+      }
+    }
+  };
+
+  useEffect(() => {
+    checkAvailableCoins();
+  }, []);  // 只在組件加載時檢查一次
 
   useEffect(() => {
     let isSubscribed = true;
@@ -178,7 +220,7 @@ const Home: FC = () => {
           <div className="mt-4 text-sm text-gray-500">
             <p>* 數據來源：各交易所官方 API</p>
             <p>* 更新頻率：每 5 分鐘</p>
-            <p>* Bybit 和 Bitget 暫無歷史數據，使用當前利率代替</p>
+            <p>* 僅顯示當前有效的理財產品</p>
           </div>
         </div>
 
@@ -186,24 +228,26 @@ const Home: FC = () => {
         <div className="bg-white rounded-lg shadow-sm p-4 mb-8">
           <div className="flex flex-wrap gap-4">
             {STABLECOINS.map((coin) => (
-              <button
-                key={coin}
-                onClick={() => setSelectedCoin(coin)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
-                  selectedCoin === coin
-                    ? 'bg-blue-50 text-blue-600 ring-2 ring-blue-600/20'
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <Image
-                  src={`/logos/${coin.toLowerCase()}.svg`}
-                  alt={coin}
-                  width={20}
-                  height={20}
-                  className="rounded-full"
-                />
-                <span className="font-medium">{coin}</span>
-              </button>
+              availableCoins.has(coin) && (
+                <button
+                  key={coin}
+                  onClick={() => setSelectedCoin(coin)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                    selectedCoin === coin
+                      ? 'bg-blue-50 text-blue-600 ring-2 ring-blue-600/20'
+                      : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <Image
+                    src={`/logos/${coin.toLowerCase()}.svg`}
+                    alt={coin}
+                    width={20}
+                    height={20}
+                    className="rounded-full"
+                  />
+                  <span className="font-medium">{coin}</span>
+                </button>
+              )
             ))}
           </div>
         </div>
@@ -235,9 +279,6 @@ const Home: FC = () => {
                           {period.label}
                         </th>
                       ))}
-                      <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        最低投資額
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -270,16 +311,14 @@ const Home: FC = () => {
                             }`}>
                               {period.key === 'latest' 
                                 ? product.apy.toFixed(2)
-                                : product.apyHistory[period.key][product.apyHistory[period.key].length - 1].toFixed(2)
+                                : (Array.isArray(product.apyHistory[period.key]) && product.apyHistory[period.key].length > 0
+                                  ? product.apyHistory[period.key][product.apyHistory[period.key].length - 1]
+                                  : product.apy
+                                  ).toFixed(2)
                               }%
                             </div>
                           </td>
                         ))}
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {product.minAmount} {product.currency}
-                          </div>
-                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -334,16 +373,19 @@ const Home: FC = () => {
                     />
                     <Tooltip 
                       contentStyle={{
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        border: '1px solid #E5E7EB',
+                        backgroundColor: 'rgba(17, 24, 39, 0.95)', // 深色背景
+                        border: 'none',
                         borderRadius: '8px',
-                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.2)',
+                        color: '#fff', // 白色文字
+                        padding: '12px'
                       }}
                       formatter={(value: number) => [
                         `${value.toFixed(2)}%`, 
                         '年化收益率'
                       ]}
                       labelFormatter={(label) => `時間: ${label}`}
+                      labelStyle={{ color: '#9CA3AF' }} // 淺灰色標籤
                     />
                     <Legend 
                       verticalAlign="top"

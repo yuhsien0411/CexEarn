@@ -9,8 +9,6 @@ export interface Product {
     '1w': number[];
     '1m': number[];
   };
-  minAmount: number;
-  maxAmount: number | null;
   updateTime: number;
 }
 
@@ -104,7 +102,7 @@ export interface BitgetApyStep {
 export interface BitgetProduct {
   productId: string;
   coin: string;
-  periodType: 'flexible' | 'fixed';
+  periodType: 'FLEXIBLE' | 'FIXED';
   period: string;
   apyType: 'single' | 'ladder';
   advanceRedeem: 'Yes' | 'No';

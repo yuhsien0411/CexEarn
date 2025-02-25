@@ -63,35 +63,41 @@ function generateBinanceSignature(queryString: string, apiSecret: string): strin
     .digest('hex');
 }
 
+// 添加延遲函數
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // 獲取幣安產品數據
 async function fetchBinanceProducts(): Promise<Product[]> {
   try {
-    const timestamp = Date.now();
-    const queryString = `current=1&size=100&timestamp=${timestamp}`;
-    const signature = generateBinanceSignature(queryString, process.env.BINANCE_API_SECRET || '');
+    // 為每個支持的穩定幣獲取數據
+    const productPromises = SUPPORTED_STABLECOINS.map(async (coin) => {
+      const timestamp = Date.now();
+      const queryString = `asset=${coin}&current=1&size=100&timestamp=${timestamp}`;
+      const signature = generateBinanceSignature(queryString, process.env.BINANCE_API_SECRET || '');
 
-    const response = await fetch(
-      `https://api.binance.com/sapi/v1/simple-earn/flexible/list?${queryString}&signature=${signature}`,
-      {
-        headers: {
-          'X-MBX-APIKEY': process.env.BINANCE_API_KEY || ''
+      const response = await fetch(
+        `https://api.binance.com/sapi/v1/simple-earn/flexible/list?${queryString}&signature=${signature}`,
+        {
+          headers: {
+            'X-MBX-APIKEY': process.env.BINANCE_API_KEY || ''
+          }
         }
+      );
+
+      if (!response.ok) {
+        console.error(`獲取幣安 ${coin} 數據失敗:`, await response.text());
+        return null;
       }
-    );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Binance API error: ${response.statusText}, ${errorText}`);
-    }
+      const data = await response.json() as BinanceFlexibleResponse;
+      const product = data.rows?.[0];
+      
+      if (!product) {
+        console.log(`幣安未找到 ${coin} 的活期產品`);
+        return null;
+      }
 
-    const data = await response.json() as BinanceFlexibleResponse;
-    const products = data.rows || [];
-    
-    // 獲取歷史數據
-    const historyPromises = SUPPORTED_STABLECOINS.map(async (coin) => {
-      const product = products.find((p: BinanceFlexibleProduct) => p.asset === coin);
-      if (!product?.productId) return { coin, history: [] };
-
+      // 獲取歷史數據
       const endTime = timestamp;
       const startTime = endTime - 30 * 24 * 60 * 60 * 1000; // 30天
       const historyQueryString = `productId=${product.productId}&startTime=${startTime}&endTime=${endTime}&current=1&size=100&timestamp=${timestamp}`;
@@ -108,47 +114,52 @@ async function fetchBinanceProducts(): Promise<Product[]> {
 
       if (!historyResponse.ok) {
         console.error(`獲取幣安歷史數據失敗 (${coin}):`, await historyResponse.text());
-        return { coin, history: [] };
+        return {
+          product,
+          history: []
+        };
       }
 
       const historyData = await historyResponse.json() as BinanceHistoryResponse;
-      return { 
-        coin, 
-        history: historyData.rows.sort((a, b) => b.time - a.time) 
-      };
-    });
-
-    const histories = await Promise.all(historyPromises);
-
-    return SUPPORTED_STABLECOINS.map(coin => {
-      const product = products.find((p: BinanceFlexibleProduct) => p.asset === coin);
-      const history = histories.find(h => h.coin === coin)?.history || [];
-      const currentApy = parseFloat(product?.latestAnnualPercentageRate || '0');
-
-      // 如果有歷史數據就使用，否則用當前值填充
-      const getHistoryOrFallback = (count: number) => {
-        if (history.length >= count) {
-          return history.slice(0, count).map(h => parseFloat(h.annualPercentageRate));
-        }
-        return Array(count).fill(currentApy);
-      };
-
       return {
-        id: `binance-${coin.toLowerCase()}-flexible`,
-        exchange: 'Binance',
-        exchangeLogo: '/logos/binance.svg',
-        currency: coin as SupportedStablecoin,
-        apy: currentApy,
-        apyHistory: {
-          '1d': getHistoryOrFallback(12),
-          '1w': getHistoryOrFallback(28),
-          '1m': getHistoryOrFallback(120)
-        },
-        minAmount: parseFloat(product?.minPurchaseAmount || '0.1'),
-        maxAmount: null,
-        updateTime: timestamp
+        product,
+        history: historyData.rows.sort((a, b) => b.time - a.time)
       };
     });
+
+    const results = await Promise.all(productPromises);
+
+    return results
+      .filter((result): result is { product: BinanceFlexibleProduct; history: BinanceHistoryProduct[] } => result !== null)
+      .map(({ product, history }) => {
+        // 將 APY 乘以 100 並格式化為兩位小數
+        const formatApy = (apy: number) => Number((apy * 100 * 100).toFixed(2)) / 100;
+        const currentApy = formatApy(parseFloat(product.latestAnnualPercentageRate));
+
+        // 如果有歷史數據就使用，否則用當前值填充
+        const getHistoryOrFallback = (count: number) => {
+          if (history.length >= count) {
+            return history
+              .slice(0, count)
+              .map(h => formatApy(parseFloat(h.annualPercentageRate)));
+          }
+          return Array(count).fill(currentApy);
+        };
+
+        return {
+          id: `binance-${product.asset.toLowerCase()}-flexible`,
+          exchange: 'Binance',
+          exchangeLogo: '/logos/binance.svg',
+          currency: product.asset as SupportedStablecoin,
+          apy: currentApy,
+          apyHistory: {
+            '1d': getHistoryOrFallback(12),
+            '1w': getHistoryOrFallback(28),
+            '1m': getHistoryOrFallback(120)
+          },
+          updateTime: Date.now()
+        };
+      });
   } catch (error) {
     console.error('獲取幣安產品數據失敗:', error);
     return [];
@@ -194,8 +205,6 @@ async function fetchBybitProducts(): Promise<Product[]> {
           '1w': Array(28).fill(parseFloat((product?.estimateApr || '0').replace('%', ''))),
           '1m': Array(120).fill(parseFloat((product?.estimateApr || '0').replace('%', '')))
         },
-        minAmount: parseFloat(product?.minStakeAmount || '1'),
-        maxAmount: product?.maxStakeAmount ? parseFloat(product.maxStakeAmount) : null,
         updateTime: timestamp
       };
     });
@@ -203,6 +212,16 @@ async function fetchBybitProducts(): Promise<Product[]> {
     console.error('獲取 Bybit 產品數據失敗:', error);
     return [];
   }
+}
+
+interface OKXHistoryEntry {
+  rate: number;
+  timestamp: number;
+}
+
+interface OKXHistoryResult {
+  coin: string;
+  history: OKXHistoryEntry[];
 }
 
 // 獲取 OKX 產品數據
@@ -232,55 +251,70 @@ async function fetchOKXProducts(): Promise<Product[]> {
     const products = data.data as OKXLendingSummaryItem[];
 
     // 獲取歷史利率數據
-    const historyPromises = SUPPORTED_STABLECOINS.map(async (coin) => {
-      const now = Date.now();
-      const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const histories: OKXHistoryResult[] = [];
+    for (const coin of SUPPORTED_STABLECOINS) {
+      try {
+        // 添加延遲以避免觸發限流
+        await delay(500);
 
-      const historyResponse = await fetch(
-        `https://www.okx.com/api/v5/finance/savings/lending-rate-history?ccy=${coin}&before=${now}&after=${oneMonthAgo}&limit=100`,
-        {
-          headers: {
-            'Content-Type': 'application/json'
+        const now = Date.now();
+        const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+        const historyResponse = await fetch(
+          `https://www.okx.com/api/v5/finance/savings/lending-rate-history?ccy=${coin}&before=${now}&after=${oneMonthAgo}&limit=100`,
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
           }
+        );
+
+        if (!historyResponse.ok) {
+          console.error(`獲取 OKX 歷史數據失敗 (${coin}):`, await historyResponse.text());
+          histories.push({ coin, history: [] });
+          continue;
         }
-      );
 
-      if (!historyResponse.ok) {
-        console.error(`獲取 OKX 歷史數據失敗 (${coin}):`, await historyResponse.text());
-        return { coin, history: [] };
-      }
-
-      const historyData = await historyResponse.json() as OKXResponse;
-      if (historyData.code !== '0') {
-        // 如果代幣不支持，靜默返回空歷史記錄
-        if (historyData.msg?.includes('not supported')) {
-          console.log(`OKX 不支持 ${coin} 的歷史數據`);
-          return { coin, history: [] };
+        const historyData = await historyResponse.json() as OKXResponse;
+        if (historyData.code !== '0') {
+          if (historyData.msg?.includes('not supported')) {
+            console.log(`OKX 不支持 ${coin} 的歷史數據`);
+            histories.push({ coin, history: [] });
+            continue;
+          }
+          if (historyData.code === '50011') { // Too Many Requests
+            console.log(`OKX API 限流，使用當前利率代替歷史數據 (${coin})`);
+            histories.push({ coin, history: [] });
+            continue;
+          }
+          console.error(`獲取 OKX 歷史數據失敗 (${coin}):`, historyData.msg);
+          histories.push({ coin, history: [] });
+          continue;
         }
-        console.error(`獲取 OKX 歷史數據失敗 (${coin}):`, historyData.msg);
-        return { coin, history: [] };
+
+        const historyItems = historyData.data as OKXLendingRateItem[];
+        histories.push({
+          coin,
+          history: historyItems
+            .sort((a, b) => parseInt(b.ts) - parseInt(a.ts))
+            .map((h) => ({
+              rate: parseFloat(h.rate),
+              timestamp: parseInt(h.ts)
+            }))
+        });
+      } catch (error) {
+        console.error(`處理 OKX ${coin} 歷史數據時出錯:`, error);
+        histories.push({ coin, history: [] });
       }
-
-      const historyItems = historyData.data as OKXLendingRateItem[];
-      return {
-        coin,
-        history: historyItems
-          .sort((a, b) => parseInt(b.ts) - parseInt(a.ts))
-          .map((h) => ({
-            rate: parseFloat(h.rate),
-            timestamp: parseInt(h.ts)
-          }))
-      };
-    });
-
-    const histories = await Promise.all(historyPromises);
+    }
 
     return SUPPORTED_STABLECOINS.map(coin => {
       const product = products.find((p) => p.ccy === coin);
-      const history = histories.find(h => h.coin === coin)?.history || [];
+      const historyResult = histories.find(h => h.coin === coin);
+      const history = historyResult?.history || [];
       
-      // 如果產品不存在，返回零利率
-      if (!product) {
+      // 如果產品不存在或利率為 0，返回空產品
+      if (!product || parseFloat(product.estRate) === 0) {
         return {
           id: `okx-${coin.toLowerCase()}-flexible`,
           exchange: 'OKX',
@@ -292,22 +326,18 @@ async function fetchOKXProducts(): Promise<Product[]> {
             '1w': Array(28).fill(0),
             '1m': Array(120).fill(0)
           },
-          minAmount: 1,
-          maxAmount: null,
           updateTime: Date.now()
         };
       }
 
-      const currentApy = parseFloat(product.estRate);
+      // 將 APY 乘以 100 並格式化為兩位小數
+      const formatApy = (apy: number) => Number((apy * 100 * 100).toFixed(2)) / 100;
+      const currentApy = formatApy(parseFloat(product.estRate));
 
       // 根據時間範圍獲取歷史數據或使用當前值填充
-      const getHistoryOrFallback = (count: number, timeRange: number) => {
-        const now = Date.now();
-        const targetTime = now - timeRange;
-        const relevantHistory = history.filter(h => h.timestamp >= targetTime);
-
-        if (relevantHistory.length >= count) {
-          return relevantHistory.slice(0, count).map(h => h.rate);
+      const getHistoryOrFallback = (count: number) => {
+        if (history.length >= count) {
+          return history.slice(0, count).map(h => formatApy(h.rate));
         }
         return Array(count).fill(currentApy);
       };
@@ -319,15 +349,13 @@ async function fetchOKXProducts(): Promise<Product[]> {
         currency: coin as SupportedStablecoin,
         apy: currentApy,
         apyHistory: {
-          '1d': getHistoryOrFallback(12, 24 * 60 * 60 * 1000),
-          '1w': getHistoryOrFallback(28, 7 * 24 * 60 * 60 * 1000),
-          '1m': getHistoryOrFallback(120, 30 * 24 * 60 * 60 * 1000)
+          '1d': getHistoryOrFallback(12),
+          '1w': getHistoryOrFallback(28),
+          '1m': getHistoryOrFallback(120)
         },
-        minAmount: 1,
-        maxAmount: null,
         updateTime: Date.now()
       };
-    });
+    }).filter(product => product.apy > 0); // 只返回有效的產品
   } catch (error) {
     console.error('獲取 OKX 產品數據失敗:', error);
     return [];
@@ -346,50 +374,109 @@ async function fetchBitgetProducts(): Promise<Product[]> {
       throw new Error('Bitget API 憑證未設置');
     }
 
-    // 生成簽名
-    const path = '/api/v2/earn/savings/product';
-    const queryString = 'filter=available_and_held';
-    const signStr = timestamp + 'GET' + path + '?' + queryString;
-    const signature = crypto
-      .createHmac('sha256', apiSecret)
-      .update(signStr)
-      .digest('base64');
+    console.log('開始獲取 Bitget 產品數據...');
 
-    // 獲取產品列表
-    const productResponse = await fetch(
-      `https://api.bitget.com${path}?${queryString}`,
-      {
-        headers: {
-          'ACCESS-KEY': apiKey,
-          'ACCESS-SIGN': signature,
-          'ACCESS-TIMESTAMP': timestamp,
-          'ACCESS-PASSPHRASE': passphrase,
-          'Content-Type': 'application/json',
-          'locale': 'en-US'
+    // 為每個穩定幣獲取產品
+    const productPromises = SUPPORTED_STABLECOINS.map(async (coin) => {
+      try {
+        // 生成簽名
+        const path = '/api/v2/earn/savings/product';
+        const queryString = `filter=available&coin=${coin}`;
+        const signStr = timestamp + 'GET' + path + '?' + queryString;
+        const signature = crypto
+          .createHmac('sha256', apiSecret)
+          .update(signStr)
+          .digest('base64');
+
+        const url = `https://api.bitget.com${path}?${queryString}`;
+        console.log(`請求 Bitget API (${coin}):`, {
+          url,
+          timestamp,
+          headers: {
+            'ACCESS-KEY': '***',
+            'ACCESS-TIMESTAMP': timestamp,
+            'Content-Type': 'application/json',
+            'locale': 'en-US'
+          }
+        });
+
+        // 獲取產品列表
+        const productResponse = await fetch(url, {
+          headers: {
+            'ACCESS-KEY': apiKey,
+            'ACCESS-SIGN': signature,
+            'ACCESS-TIMESTAMP': timestamp,
+            'ACCESS-PASSPHRASE': passphrase,
+            'Content-Type': 'application/json',
+            'locale': 'en-US'
+          }
+        });
+
+        if (!productResponse.ok) {
+          const errorText = await productResponse.text();
+          console.error(`Bitget ${coin} API 響應錯誤:`, {
+            status: productResponse.status,
+            statusText: productResponse.statusText,
+            error: errorText
+          });
+          return { coin, products: [] };
         }
+
+        const productData = await productResponse.json() as BitgetResponse;
+        console.log(`Bitget ${coin} API 響應:`, {
+          code: productData.code,
+          msg: productData.msg,
+          dataLength: productData.data?.length || 0
+        });
+        
+        if (productData.code !== '00000') {
+          console.error(`Bitget ${coin} API 業務錯誤:`, productData.msg);
+          return { coin, products: [] };
+        }
+
+        // 打印完整的產品數據
+        console.log(`Bitget ${coin} 產品數據:`, JSON.stringify(productData.data, null, 2));
+
+        return { coin, products: productData.data || [] };
+      } catch (error) {
+        console.error(`獲取 Bitget ${coin} 產品數據時出錯:`, error);
+        return { coin, products: [] };
       }
-    );
+    });
 
-    if (!productResponse.ok) {
-      const errorText = await productResponse.text();
-      throw new Error(`Bitget API error: ${productResponse.statusText}, ${errorText}`);
-    }
+    const results = await Promise.all(productPromises);
+    const allProducts = results.flatMap(result => result.products);
 
-    const productData = await productResponse.json() as BitgetResponse;
-    
-    if (productData.code !== '00000') {
-      throw new Error(`Bitget API error: ${productData.msg}`);
-    }
-
-    const products = productData.data || [];
+    console.log('Bitget 所有產品數據:', {
+      totalProducts: allProducts.length,
+      products: allProducts.map(p => ({
+        coin: p.coin,
+        periodType: p.periodType,
+        status: p.status,
+        apyList: p.apyList
+      }))
+    });
 
     return SUPPORTED_STABLECOINS.map(coin => {
-      const product = products.find((p: BitgetProduct) => 
-        p.coin === coin && 
-        p.periodType === 'flexible'
-      );
+      // 找到對應幣種的所有產品
+      const matchingProducts = allProducts.filter((p: BitgetProduct) => {
+        const isMatch = p.coin === coin && 
+                       p.periodType.toLowerCase() === 'flexible' && 
+                       p.status === 'in_progress';
+        console.log(`Bitget 產品匹配檢查 (${coin}):`, {
+          productId: p.productId,
+          coin: p.coin,
+          periodType: p.periodType,
+          status: p.status,
+          isMatch
+        });
+        return isMatch;
+      });
 
-      if (!product) {
+      console.log(`Bitget ${coin} 匹配到的產品數量:`, matchingProducts.length);
+
+      if (matchingProducts.length === 0) {
+        console.log(`Bitget: 未找到 ${coin} 的活期產品`);
         return {
           id: `bitget-${coin.toLowerCase()}-flexible`,
           exchange: 'Bitget',
@@ -401,42 +488,46 @@ async function fetchBitgetProducts(): Promise<Product[]> {
             '1w': Array(28).fill(0),
             '1m': Array(120).fill(0)
           },
-          minAmount: 100,
-          maxAmount: null,
           updateTime: Date.now()
         };
       }
 
-      // 獲取大於 500U 的階梯利率
-      const targetStep = product.apyList.find(step => 
-        parseFloat(step.minStepVal) >= 500 || 
-        (parseFloat(step.minStepVal) < 500 && parseFloat(step.maxStepVal) > 500)
-      );
-      
-      // 如果找不到合適的階梯，使用最高階梯
-      const currentApy = targetStep 
-        ? parseFloat(targetStep.currentApy)
-        : Math.max(...product.apyList.map(step => parseFloat(step.currentApy)));
+      // 從所有匹配的產品中找到最高利率的產品
+      const product = matchingProducts.reduce((best, current) => {
+        // 選擇每個產品中等級2的利率（跳過平台獎勵）
+        const getBestApy = (p: BitgetProduct) => {
+          if (!p.apyList || p.apyList.length < 2) return 0;
+          // 使用第二個等級的利率（等級2：500-50,000,000）
+          return parseFloat(p.apyList[1]?.currentApy || '0');
+        };
+        
+        const bestApy = getBestApy(best);
+        const currentApy = getBestApy(current);
+        return currentApy > bestApy ? current : best;
+      }, matchingProducts[0]);
 
-      // 獲取最小和最大投資額
-      const minAmount = parseFloat(product.apyList[0]?.minStepVal || '100');
-      const maxAmount = parseFloat(
-        product.apyList[product.apyList.length - 1]?.maxStepVal || '0'
-      );
-      
+      console.log(`Bitget ${coin} 選中的最佳產品:`, {
+        productId: product.productId,
+        apyList: product.apyList,
+        selectedApy: product.apyList[1]?.currentApy
+      });
+
+      // 使用等級2的利率和最小投資額
+      const selectedApy = parseFloat(product.apyList[1]?.currentApy || '0');
+      const minAmount = Math.max(500, parseFloat(product.apyList[1]?.minStepVal || '500'));
+      const maxAmount = parseFloat(product.apyList[1]?.maxStepVal || '50000000');
+
       return {
         id: `bitget-${coin.toLowerCase()}-flexible`,
         exchange: 'Bitget',
         exchangeLogo: '/logos/bitget.svg',
         currency: coin as SupportedStablecoin,
-        apy: currentApy,
+        apy: selectedApy,
         apyHistory: {
-          '1d': Array(12).fill(currentApy),
-          '1w': Array(28).fill(currentApy),
-          '1m': Array(120).fill(currentApy)
+          '1d': Array(12).fill(selectedApy),
+          '1w': Array(28).fill(selectedApy),
+          '1m': Array(120).fill(selectedApy)
         },
-        minAmount: minAmount,
-        maxAmount: maxAmount > 0 ? maxAmount : null,
         updateTime: Date.now()
       };
     });
@@ -481,11 +572,19 @@ export async function GET(request: Request) {
       ...okxProducts,
       ...bitgetProducts
     ]
-    .filter(product => product.currency === coin)
+    .filter(product => {
+      // 檢查產品是否匹配選擇的幣種並且有效
+      const isMatchingCoin = product.currency === coin;
+      const isValidApy = product.apy > 0;
+      console.log(`${product.exchange} ${product.currency} APY: ${product.apy}`);
+      return isMatchingCoin && isValidApy;
+    })
     .sort((a, b) => b.apy - a.apy);
 
     // 設置緩存
-    setCacheData(cacheKey, products);
+    if (products.length > 0) {  // 只緩存有效的產品數據
+      setCacheData(cacheKey, products);
+    }
 
     return NextResponse.json({ 
       success: true, 
