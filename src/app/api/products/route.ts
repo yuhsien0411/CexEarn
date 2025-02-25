@@ -149,7 +149,7 @@ async function fetchBinanceProducts(): Promise<Product[]> {
         return {
           id: `binance-${product.asset.toLowerCase()}-flexible`,
           exchange: 'Binance',
-          exchangeLogo: '/logos/binance.svg',
+          exchangeLogo: '/logos/binance.png',
           currency: product.asset as SupportedStablecoin,
           apy: currentApy,
           apyHistory: {
@@ -197,7 +197,7 @@ async function fetchBybitProducts(): Promise<Product[]> {
       return {
         id: `bybit-${coin.toLowerCase()}-flexible`,
         exchange: 'Bybit',
-        exchangeLogo: '/logos/bybit.svg',
+        exchangeLogo: '/logos/bybit.png',
         currency: coin as SupportedStablecoin,
         apy: parseFloat((product?.estimateApr || '0').replace('%', '')),
         apyHistory: {
@@ -318,7 +318,7 @@ async function fetchOKXProducts(): Promise<Product[]> {
         return {
           id: `okx-${coin.toLowerCase()}-flexible`,
           exchange: 'OKX',
-          exchangeLogo: '/logos/okx.svg',
+          exchangeLogo: '/logos/okx.png',
           currency: coin as SupportedStablecoin,
           apy: 0,
           apyHistory: {
@@ -345,7 +345,7 @@ async function fetchOKXProducts(): Promise<Product[]> {
       return {
         id: `okx-${coin.toLowerCase()}-flexible`,
         exchange: 'OKX',
-        exchangeLogo: '/logos/okx.svg',
+        exchangeLogo: '/logos/okx.png',
         currency: coin as SupportedStablecoin,
         apy: currentApy,
         apyHistory: {
@@ -480,7 +480,7 @@ async function fetchBitgetProducts(): Promise<Product[]> {
         return {
           id: `bitget-${coin.toLowerCase()}-flexible`,
           exchange: 'Bitget',
-          exchangeLogo: '/logos/bitget.svg',
+          exchangeLogo: '/logos/bitget.png',
           currency: coin as SupportedStablecoin,
           apy: 0,
           apyHistory: {
@@ -527,7 +527,7 @@ async function fetchBitgetProducts(): Promise<Product[]> {
       return {
         id: `bitget-${coin.toLowerCase()}-flexible`,
         exchange: 'Bitget',
-        exchangeLogo: '/logos/bitget.svg',
+        exchangeLogo: '/logos/bitget.png',
         currency: coin as SupportedStablecoin,
         apy: selectedApy,
         apyHistory: {

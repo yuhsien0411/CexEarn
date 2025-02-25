@@ -247,7 +247,7 @@ const Home: FC = () => {
                   }`}
                 >
                   <Image
-                    src={`/logos/${coin.toLowerCase()}.svg`}
+                    src={`/logos/${coin.toLowerCase()}.png`}
                     alt={coin}
                     width={20}
                     height={20}
@@ -296,7 +296,7 @@ const Home: FC = () => {
                           <div className="flex items-center">
                             <div className="flex-shrink-0 h-8 w-8 relative">
                               <Image
-                                src={product.exchangeLogo}
+                                src={product.exchangeLogo.replace('.svg', '.png')}
                                 alt={product.exchange}
                                 width={32}
                                 height={32}

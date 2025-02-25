@@ -1,0 +1,28 @@
+{
+  "name": "CexEarn - 中心化交易所活期理財收益比較",
+  "short_name": "CexEarn",
+  "description": "即時比較 Binance、Bybit、OKX、Bitget 等主流交易所的穩定幣活期理財年化收益率（APY）",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3B82F6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+} 

@@ -1,6 +1,7 @@
 export interface Product {
   id: string;
   exchange: string;
+  /** 交易所 logo 路徑，例如：'/logos/binance.png' */
   exchangeLogo: string;
   currency: string;
   apy: number;
