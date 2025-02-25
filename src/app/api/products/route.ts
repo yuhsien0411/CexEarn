@@ -460,7 +460,7 @@ async function fetchBitgetProducts(): Promise<Product[]> {
     return SUPPORTED_STABLECOINS.map(coin => {
       // 找到對應幣種的所有產品
       const matchingProducts = allProducts.filter((p: BitgetProduct) => {
-        const isMatch = p.coin === coin && 
+        const isMatch = p.coin.toUpperCase() === coin && 
                        p.periodType.toLowerCase() === 'flexible' && 
                        p.status === 'in_progress';
         console.log(`Bitget 產品匹配檢查 (${coin}):`, {
@@ -494,11 +494,14 @@ async function fetchBitgetProducts(): Promise<Product[]> {
 
       // 從所有匹配的產品中找到最高利率的產品
       const product = matchingProducts.reduce((best, current) => {
-        // 選擇每個產品中等級2的利率（跳過平台獎勵）
+        // 選擇產品中的最佳利率
         const getBestApy = (p: BitgetProduct) => {
-          if (!p.apyList || p.apyList.length < 2) return 0;
-          // 使用第二個等級的利率（等級2：500-50,000,000）
-          return parseFloat(p.apyList[1]?.currentApy || '0');
+          if (!p.apyList || p.apyList.length === 0) return 0;
+          // 如果只有一個等級，使用該等級的利率
+          // 如果有多個等級，使用第二個等級的利率（跳過平台獎勵）
+          return p.apyList.length === 1 
+            ? parseFloat(p.apyList[0]?.currentApy || '0')
+            : parseFloat(p.apyList[1]?.currentApy || '0');
         };
         
         const bestApy = getBestApy(best);
@@ -509,11 +512,15 @@ async function fetchBitgetProducts(): Promise<Product[]> {
       console.log(`Bitget ${coin} 選中的最佳產品:`, {
         productId: product.productId,
         apyList: product.apyList,
-        selectedApy: product.apyList[1]?.currentApy
+        selectedApy: product.apyList.length === 1 
+          ? product.apyList[0]?.currentApy 
+          : product.apyList[1]?.currentApy
       });
 
-      // 使用等級2的利率和最小投資額
-      const selectedApy = parseFloat(product.apyList[1]?.currentApy || '0');
+      // 使用最佳利率
+      const selectedApy = product.apyList.length === 1
+        ? parseFloat(product.apyList[0]?.currentApy || '0')
+        : parseFloat(product.apyList[1]?.currentApy || '0');
       const minAmount = Math.max(500, parseFloat(product.apyList[1]?.minStepVal || '500'));
       const maxAmount = parseFloat(product.apyList[1]?.maxStepVal || '50000000');
 

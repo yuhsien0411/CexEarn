@@ -118,7 +118,11 @@ const Home: FC = () => {
           setProducts(data.data || []);
           setRetryCount(0);
         }
-      } catch (err) {
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return; // 忽略中止錯誤
+        }
+        
         console.error('獲取數據失敗:', err);
         
         if (!isSubscribed) return;
@@ -145,7 +149,11 @@ const Home: FC = () => {
     
     return () => {
       isSubscribed = false;
-      controller.abort();
+      try {
+        controller.abort();
+      } catch (err: unknown) {
+        console.error('中止請求時出錯:', err);
+      }
       clearInterval(intervalId);
     };
   }, [selectedPeriod, selectedCoin]);
